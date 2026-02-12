@@ -32,9 +32,10 @@ async function main() {
         username: 'admin',
         email: 'admin@inventory.com',
         password: hashedPassword,
+        role: 'ADMIN',
       },
     });
-    console.log('Created default admin user (username: admin, password: admin123)');
+    console.log('Created default admin user (username: admin, password: admin123, role: ADMIN)');
   }
 
   // Create stock items (Items Master)

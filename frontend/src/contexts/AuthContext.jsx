@@ -11,12 +11,21 @@ export function AuthProvider({ children }) {
     const token = localStorage.getItem('token');
     const storedUser = localStorage.getItem('user');
     if (token && storedUser) {
-      setUser(JSON.parse(storedUser));
-      api.auth.me().catch(() => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
-      });
+      const parsedUser = JSON.parse(storedUser);
+      setUser(parsedUser);
+      // Refresh user data from server to get latest role
+      api.auth.me()
+        .then((res) => {
+          if (res.user) {
+            setUser(res.user);
+            localStorage.setItem('user', JSON.stringify(res.user));
+          }
+        })
+        .catch(() => {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+        });
     }
     setLoading(false);
   }, []);

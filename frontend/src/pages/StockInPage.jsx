@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { api } from '../api';
+import { api, openProofOfDelivery } from '../api';
+import { useAuth } from '../contexts/AuthContext';
 import BulkImportModal from '../components/BulkImportModal';
 
 const getQuarter = (d) => {
@@ -9,6 +10,10 @@ const getQuarter = (d) => {
 };
 
 export default function StockInPage() {
+  const { user } = useAuth();
+  const isViewer = user?.role === 'VIEWER';
+  const isUser = user?.role === 'USER';
+  const canEdit = !isViewer && !isUser; // Only ADMIN and MANAGER can edit
   const [items, setItems] = useState([]);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -21,6 +26,7 @@ export default function StockInPage() {
     quantity: '',
     specification: '',
   });
+  const [proofFile, setProofFile] = useState(null);
 
   const loadData = async () => {
     try {
@@ -50,13 +56,24 @@ export default function StockInPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await api.stockIn.create({
-        itemId: form.itemId,
-        receivedDate: form.receivedDate,
-        receivedQuarter: form.receivedQuarter,
-        quantity: Number(form.quantity),
-        specification: form.specification || null,
-      });
+      if (proofFile) {
+        const formData = new FormData();
+        formData.append('itemId', form.itemId);
+        formData.append('receivedDate', form.receivedDate);
+        formData.append('receivedQuarter', form.receivedQuarter);
+        formData.append('quantity', form.quantity);
+        formData.append('specification', form.specification || '');
+        formData.append('proofOfDelivery', proofFile);
+        await api.stockIn.createWithFile(formData);
+      } else {
+        await api.stockIn.create({
+          itemId: form.itemId,
+          receivedDate: form.receivedDate,
+          receivedQuarter: form.receivedQuarter,
+          quantity: Number(form.quantity),
+          specification: form.specification || null,
+        });
+      }
       setForm({
         itemId: '',
         receivedDate: new Date().toISOString().slice(0, 10),
@@ -64,6 +81,7 @@ export default function StockInPage() {
         quantity: '',
         specification: '',
       });
+      setProofFile(null);
       loadData();
     } catch (err) {
       setError(err.message);
@@ -76,14 +94,20 @@ export default function StockInPage() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">Stock In</h1>
-        <button
-          onClick={() => setBulkOpen(true)}
-          className="px-4 py-2 border border-slate-300 rounded-md hover:bg-slate-50"
-        >
-          Bulk Import
-        </button>
+        {canEdit ? (
+          <button
+            onClick={() => setBulkOpen(true)}
+            className="px-4 py-2 border border-slate-300 rounded-md hover:bg-slate-50"
+          >
+            Bulk Import
+          </button>
+        ) : (
+          <div className="text-sm text-slate-500 italic">
+            Read-only mode ({isViewer ? 'VIEWER' : 'USER'})
+          </div>
+        )}
       </div>
-      {bulkOpen && (
+      {bulkOpen && canEdit && (
         <BulkImportModal
           type="stockIn"
           onClose={() => setBulkOpen(false)}
@@ -95,7 +119,8 @@ export default function StockInPage() {
         />
       )}
 
-      <form
+      {canEdit && (
+        <form
         onSubmit={handleSubmit}
         className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 mb-6"
       >
@@ -160,6 +185,20 @@ export default function StockInPage() {
               className="w-full px-3 py-2 border border-slate-300 rounded-md"
             />
           </label>
+          <label className="md:col-span-2">
+            <span className="block text-sm text-slate-600 mb-1">Proof of Delivery (optional, PDF only)</span>
+            <input
+              type="file"
+              accept=".pdf,application/pdf"
+              onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-md file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+            />
+            {proofFile && (
+              <span className="text-sm text-slate-500 mt-1 block">
+                Selected: {proofFile.name}
+              </span>
+            )}
+          </label>
         </div>
         <button
           type="submit"
@@ -168,6 +207,7 @@ export default function StockInPage() {
           Record Stock In
         </button>
       </form>
+      )}
 
       <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
         <h2 className="px-4 py-3 bg-slate-50 font-medium">Recent Stock In</h2>
@@ -179,6 +219,7 @@ export default function StockInPage() {
               <th className="px-4 py-3 font-medium">Quarter</th>
               <th className="px-4 py-3 font-medium">Quantity</th>
               <th className="px-4 py-3 font-medium">Specification</th>
+              <th className="px-4 py-3 font-medium">Proof of Delivery</th>
             </tr>
           </thead>
           <tbody>
@@ -189,6 +230,19 @@ export default function StockInPage() {
                 <td className="px-4 py-3">{e.receivedQuarter}</td>
                 <td className="px-4 py-3 font-medium">{e.quantity}</td>
                 <td className="px-4 py-3 text-slate-500">{e.specification ?? '-'}</td>
+                <td className="px-4 py-3">
+                  {e.proofOfDelivery ? (
+                    <button
+                      type="button"
+                      onClick={() => openProofOfDelivery(e.proofOfDelivery)}
+                      className="text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      View PDF
+                    </button>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

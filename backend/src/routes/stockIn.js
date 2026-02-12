@@ -1,8 +1,25 @@
 import { Router } from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import prisma from '../lib/prisma.js';
+import { uploadProofOfDelivery } from '../middleware/upload.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const router = Router();
 const MIN_QUANTITY = 1;
+
+// GET /api/stock-in/proof - Serve proof of delivery PDF file
+router.get('/proof', (req, res) => {
+  const filePath = req.query.file;
+  if (!filePath || typeof filePath !== 'string' || filePath.includes('..')) {
+    return res.status(400).json({ error: 'Invalid file path' });
+  }
+  const fullPath = path.resolve(__dirname, '../../uploads', filePath);
+  res.sendFile(fullPath, { headers: { 'Content-Disposition': 'inline' } }, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'File not found' });
+  });
+});
 
 // GET /api/stock-in - List stock in entries (optional ?itemId=xxx filter)
 router.get('/', async (req, res) => {
@@ -75,28 +92,36 @@ router.post('/bulk', async (req, res) => {
   }
 });
 
-// POST /api/stock-in - Create stock in entry
-router.post('/', async (req, res) => {
+// POST /api/stock-in - Create stock in entry (supports multipart/form-data with PDF proof of delivery)
+router.post('/', uploadProofOfDelivery, async (req, res) => {
   try {
     const { itemId, receivedDate, receivedQuarter, quantity, specification } = req.body;
     if (!itemId || !receivedDate || !receivedQuarter || quantity == null) {
       return res.status(400).json({ error: 'Missing required fields: itemId, receivedDate, receivedQuarter, quantity' });
     }
-    if (quantity < MIN_QUANTITY) {
+    if (Number(quantity) < MIN_QUANTITY) {
       return res.status(400).json({ error: 'Quantity must be greater than 0' });
+    }
+    let proofOfDeliveryPath = null;
+    if (req.file && req.file.filename) {
+      proofOfDeliveryPath = `proof-of-delivery/${req.file.filename}`;
     }
     const entry = await prisma.stockIn.create({
       data: {
         itemId,
         receivedDate: new Date(receivedDate),
-        receivedQuarter,
-        quantity,
-        specification: specification ?? null,
+        receivedQuarter: String(receivedQuarter).trim(),
+        quantity: Number(quantity),
+        specification: specification ? String(specification).trim() : null,
+        proofOfDelivery: proofOfDeliveryPath,
       },
       include: { item: true },
     });
     res.status(201).json(entry);
   } catch (error) {
+    if (error.message && error.message.includes('Only PDF')) {
+      return res.status(400).json({ error: 'Only PDF files are allowed for proof of delivery' });
+    }
     if (error.code === 'P2003') return res.status(400).json({ error: 'Invalid itemId' });
     res.status(500).json({ error: error.message });
   }

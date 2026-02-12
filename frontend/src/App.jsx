@@ -4,9 +4,12 @@ import ItemsPage from './pages/ItemsPage';
 import StockInPage from './pages/StockInPage';
 import StockOutPage from './pages/StockOutPage';
 import DashboardPage from './pages/DashboardPage';
+import UsersPage from './pages/UsersPage';
+import SuppliersPage from './pages/SuppliersPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import RoleProtectedRoute from './components/RoleProtectedRoute';
 
 function NavLink({ to, children }) {
   const { pathname } = useLocation();
@@ -37,11 +40,19 @@ function AppContent() {
               </Link>
               <NavLink to="/dashboard">Dashboard</NavLink>
               <NavLink to="/items">Items</NavLink>
-              <NavLink to="/stock-in">Stock In</NavLink>
+              <NavLink to="/suppliers">Suppliers</NavLink>
+              {user?.role && user.role !== 'USER' && (
+                <NavLink to="/stock-in">Stock In</NavLink>
+              )}
               <NavLink to="/stock-out">Stock Out</NavLink>
+              {user?.role && (user.role === 'ADMIN' || user.role === 'MANAGER') && (
+                <NavLink to="/users">Users</NavLink>
+              )}
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-sm text-slate-600">Hello, {user.username}</span>
+              <span className="text-sm text-slate-600">
+                Hello, {user.username}{user.role && ` (${user.role})`}
+              </span>
               <button
                 onClick={logout}
                 className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900"
@@ -76,9 +87,9 @@ function AppContent() {
           <Route
             path="/stock-in"
             element={
-              <ProtectedRoute>
+              <RoleProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'VIEWER']}>
                 <StockInPage />
-              </ProtectedRoute>
+              </RoleProtectedRoute>
             }
           />
           <Route
@@ -87,6 +98,22 @@ function AppContent() {
               <ProtectedRoute>
                 <StockOutPage />
               </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/suppliers"
+            element={
+              <ProtectedRoute>
+                <SuppliersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <RoleProtectedRoute allowedRoles={['ADMIN', 'MANAGER']}>
+                <UsersPage />
+              </RoleProtectedRoute>
             }
           />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />

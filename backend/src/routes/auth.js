@@ -23,10 +23,11 @@ router.post('/register', async (req, res) => {
         username,
         email,
         password: hashedPassword,
+        role: 'USER', // Default role for new registrations
       },
-      select: { id: true, username: true, email: true, createdAt: true },
+      select: { id: true, username: true, email: true, role: true, createdAt: true },
     });
-    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, {
+    const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, {
       expiresIn: JWT_EXPIRES_IN,
     });
     res.status(201).json({ user, token });
@@ -49,19 +50,23 @@ router.post('/login', async (req, res) => {
       where: {
         OR: [{ username }, { email: username }],
       },
+      select: { id: true, username: true, email: true, password: true, role: true, isActive: true },
     });
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    if (!user.isActive) {
+      return res.status(403).json({ error: 'Account is deactivated' });
     }
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, {
+    const token = jwt.sign({ userId: user.id, username: user.username, role: user.role }, JWT_SECRET, {
       expiresIn: JWT_EXPIRES_IN,
     });
     res.json({
-      user: { id: user.id, username: user.username, email: user.email },
+      user: { id: user.id, username: user.username, email: user.email, role: user.role },
       token,
     });
   } catch (error) {
@@ -80,7 +85,7 @@ router.get('/me', async (req, res) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, username: true, email: true, createdAt: true },
+      select: { id: true, username: true, email: true, role: true, createdAt: true },
     });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });

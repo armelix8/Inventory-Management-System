@@ -1,32 +1,44 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../api';
+import { useAuth } from '../contexts/AuthContext';
 import BulkImportModal from '../components/BulkImportModal';
 
 export default function ItemsPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const isViewer = user?.role === 'VIEWER';
+  const isUser = user?.role === 'USER';
+  const canEdit = !isViewer && !isUser; // Only ADMIN and MANAGER can edit
+  const canRequest = !isViewer; // USER, MANAGER, ADMIN can request stock
   const [items, setItems] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [balances, setBalances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [reclassifying, setReclassifying] = useState(false);
   const [form, setForm] = useState({
     itemName: '',
+    supplierId: '',
     supplier: '',
     unit: '',
     unitPrice: '',
-    itemType: '',
+    itemType: 'Other',
   });
 
   const loadData = async () => {
     try {
       setError(null);
-      const [itemsRes, balancesRes] = await Promise.all([
+      const [itemsRes, suppliersRes, balancesRes] = await Promise.all([
         api.items.list(),
+        api.suppliers.list(),
         api.balance.list(),
       ]);
       setItems(itemsRes);
+      setSuppliers(suppliersRes);
       setBalances(balancesRes);
     } catch (err) {
       setError(err.message);
@@ -40,20 +52,59 @@ export default function ItemsPage() {
   }, []);
 
   const getBalance = (itemId) => balances.find((b) => b.itemId === itemId)?.balance ?? 0;
+  
+  const isOutOfStock = (itemId) => getBalance(itemId) === 0;
+  const isLowStock = (itemId) => {
+    const balance = getBalance(itemId);
+    return balance > 0 && balance < 10;
+  };
+
+  const handleRequestStock = (item) => {
+    // Navigate to stock-out page with item pre-selected
+    navigate(`/stock-out?itemId=${item.id}`);
+  };
+
+  // Filter items based on search query
+  const filteredItems = items.filter((item) => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase().trim();
+    const supplierName = item.supplierRef?.name || item.supplier || '';
+    return (
+      item.itemName.toLowerCase().includes(query) ||
+      supplierName.toLowerCase().includes(query) ||
+      (item.itemType || 'Other').toLowerCase().includes(query) ||
+      item.unit.toLowerCase().includes(query)
+    );
+  });
 
   const resetForm = () => {
-    setForm({ itemName: '', supplier: '', unit: '', unitPrice: '', itemType: '' });
+    setForm({ itemName: '', supplierId: '', supplier: '', unit: '', unitPrice: '', itemType: 'Other' });
     setEditing(null);
     setFormOpen(false);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.supplierId && !form.supplier?.trim()) {
+      setError('Please select a supplier or enter a supplier name.');
+      return;
+    }
     try {
-      if (editing) {
-        await api.items.update(editing.id, form);
+      const payload = {
+        itemName: form.itemName,
+        unit: form.unit,
+        unitPrice: form.unitPrice,
+        itemType: form.itemType,
+      };
+      if (form.supplierId) {
+        payload.supplierId = form.supplierId;
       } else {
-        await api.items.create(form);
+        payload.supplier = form.supplier.trim();
+      }
+      if (editing) {
+        await api.items.update(editing.id, payload);
+      } else {
+        await api.items.create(payload);
       }
       resetForm();
       loadData();
@@ -64,12 +115,20 @@ export default function ItemsPage() {
 
   const handleEdit = (item) => {
     setEditing(item);
+    let supplierId = item.supplierId || '';
+    let supplier = '';
+    if (!supplierId && item.supplier) {
+      const match = suppliers.find((s) => s.name.toLowerCase() === item.supplier?.toLowerCase());
+      if (match) supplierId = match.id;
+      else supplier = item.supplier;
+    }
     setForm({
       itemName: item.itemName,
-      supplier: item.supplier,
+      supplierId,
+      supplier,
       unit: item.unit,
       unitPrice: String(item.unitPrice),
-      itemType: item.itemType || '',
+      itemType: item.itemType || 'Other',
     });
     setFormOpen(true);
   };
@@ -84,21 +143,6 @@ export default function ItemsPage() {
     }
   };
 
-  const handleReclassifyAll = async () => {
-    if (!confirm('Re-classify all items using AI? This may take a moment.')) return;
-    setReclassifying(true);
-    setError(null);
-    try {
-      const result = await api.items.reclassifyAll();
-      alert(`Re-classified ${result.updated} items.${result.errors.length > 0 ? ` ${result.errors.length} errors occurred.` : ''}`);
-      loadData();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setReclassifying(false);
-    }
-  };
-
   if (loading) return <div className="text-slate-500">Loading...</div>;
   if (error) return <div className="text-red-600 bg-red-50 p-4 rounded-md">{error}</div>;
 
@@ -106,28 +150,27 @@ export default function ItemsPage() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">Items</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={handleReclassifyAll}
-            disabled={reclassifying}
-            className="px-4 py-2 border border-blue-300 text-blue-700 rounded-md hover:bg-blue-50 disabled:opacity-50"
-            title="Re-classify all items using AI"
-          >
-            {reclassifying ? 'Re-classifying...' : 'Re-classify All (AI)'}
-          </button>
-          <button
-            onClick={() => setBulkOpen(true)}
-            className="px-4 py-2 border border-slate-300 rounded-md hover:bg-slate-50"
-          >
-            Bulk Import
-          </button>
-          <button
-            onClick={() => setFormOpen(true)}
-            className="px-4 py-2 bg-slate-800 text-white rounded-md hover:bg-slate-700"
-          >
-            Add Item
-          </button>
-        </div>
+        {canEdit && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setBulkOpen(true)}
+              className="px-4 py-2 border border-slate-300 rounded-md hover:bg-slate-50"
+            >
+              Bulk Import
+            </button>
+            <button
+              onClick={() => setFormOpen(true)}
+              className="px-4 py-2 bg-slate-800 text-white rounded-md hover:bg-slate-700"
+            >
+              Add Item
+            </button>
+          </div>
+        )}
+        {(isViewer || isUser) && (
+          <div className="text-sm text-slate-500 italic">
+            Read-only mode ({isViewer ? 'VIEWER' : 'USER'})
+          </div>
+        )}
       </div>
       {bulkOpen && (
         <BulkImportModal
@@ -141,7 +184,53 @@ export default function ItemsPage() {
         />
       )}
 
-      {formOpen && (
+      {/* Search Bar */}
+      <div className="mb-6">
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Search by item name, supplier, type, or unit..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full px-4 py-2 pl-10 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+          />
+          <svg
+            className="absolute left-3 top-2.5 h-5 w-5 text-slate-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
+        {searchQuery && (
+          <div className="mt-2 text-sm text-slate-600">
+            Showing {filteredItems.length} of {items.length} items
+          </div>
+        )}
+      </div>
+
+      {formOpen && canEdit && (
         <form
           onSubmit={handleSubmit}
           className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 mb-6"
@@ -160,13 +249,35 @@ export default function ItemsPage() {
             </label>
             <label>
               <span className="block text-sm text-slate-600 mb-1">Supplier</span>
-              <input
-                type="text"
-                required
-                value={form.supplier}
-                onChange={(e) => setForm({ ...form, supplier: e.target.value })}
+              <select
+                value={form.supplierId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setForm({ ...form, supplierId: id, supplier: id ? '' : form.supplier });
+                }}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md"
-              />
+              >
+                <option value="">Select supplier</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              {suppliers.length === 0 && (
+                <span className="text-xs text-amber-600 mt-1 block">
+                  Add suppliers in the Suppliers page first.
+                </span>
+              )}
+              {!form.supplierId && (
+                <input
+                  type="text"
+                  value={form.supplier}
+                  onChange={(e) => setForm({ ...form, supplier: e.target.value })}
+                  placeholder="Or type custom supplier name"
+                  className="w-full mt-2 px-3 py-2 border border-slate-300 rounded-md"
+                />
+              )}
             </label>
             <label>
               <span className="block text-sm text-slate-600 mb-1">Unit</span>
@@ -193,18 +304,14 @@ export default function ItemsPage() {
             <label>
               <span className="block text-sm text-slate-600 mb-1">Item Type</span>
               <select
-                value={form.itemType}
+                value={form.itemType || 'Other'}
                 onChange={(e) => setForm({ ...form, itemType: e.target.value })}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md"
               >
-                <option value="">Auto-classify (AI)</option>
                 <option value="Asset">Asset</option>
                 <option value="Consumable">Consumable</option>
                 <option value="Other">Other</option>
               </select>
-              <span className="text-xs text-slate-500 mt-1 block">
-                Leave empty to auto-classify using AI, or select manually
-              </span>
             </label>
           </div>
           <div className="flex gap-2 mt-4">
@@ -228,48 +335,110 @@ export default function ItemsPage() {
               <th className="px-4 py-3 font-medium">Unit</th>
               <th className="px-4 py-3 font-medium">Unit Price</th>
               <th className="px-4 py-3 font-medium">Balance</th>
-              <th className="px-4 py-3 font-medium w-24">Actions</th>
+              {canRequest && <th className="px-4 py-3 font-medium w-32">Request</th>}
+              {canEdit && <th className="px-4 py-3 font-medium w-24">Actions</th>}
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr key={item.id} className="border-t border-slate-100 hover:bg-slate-50/50">
-                <td className="px-4 py-3 font-medium">{item.itemName}</td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`px-2 py-1 rounded text-xs font-medium ${
-                      item.itemType === 'Asset'
-                        ? 'bg-blue-100 text-blue-800'
-                        : item.itemType === 'Consumable'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-slate-100 text-slate-800'
-                    }`}
-                  >
-                    {item.itemType || 'Other'}
-                  </span>
+            {filteredItems.map((item) => {
+              const balance = getBalance(item.id);
+              const outOfStock = isOutOfStock(item.id);
+              const lowStock = isLowStock(item.id);
+              
+              return (
+                <tr 
+                  key={item.id} 
+                  className={`border-t hover:bg-slate-50/50 ${
+                    outOfStock ? 'bg-red-50/50' : lowStock ? 'bg-yellow-50/50' : ''
+                  }`}
+                >
+                  <td className="px-4 py-3 font-medium">{item.itemName}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-medium ${
+                        item.itemType === 'Asset'
+                          ? 'bg-blue-100 text-blue-800'
+                          : item.itemType === 'Consumable'
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-slate-100 text-slate-800'
+                      }`}
+                    >
+                      {item.itemType || 'Other'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                  {item.supplierId && item.supplierRef ? (
+                    <Link
+                      to="/suppliers"
+                      className="text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      {item.supplier}
+                    </Link>
+                  ) : (
+                    item.supplier
+                  )}
                 </td>
-                <td className="px-4 py-3">{item.supplier}</td>
-                <td className="px-4 py-3">{item.unit}</td>
-                <td className="px-4 py-3">{Number(item.unitPrice).toFixed(2)}</td>
-                <td className="px-4 py-3 font-medium">{getBalance(item.id)}</td>
-                <td className="px-4 py-3">
-                  <button
-                    onClick={() => handleEdit(item)}
-                    className="text-slate-600 hover:text-slate-900 mr-2"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(item.id)}
-                    className="text-red-600 hover:text-red-700"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  <td className="px-4 py-3">{item.unit}</td>
+                  <td className="px-4 py-3">{Number(item.unitPrice).toFixed(2)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`font-medium ${
+                        outOfStock ? 'text-red-600' : lowStock ? 'text-yellow-600' : 'text-slate-900'
+                      }`}>
+                        {balance}
+                      </span>
+                      {outOfStock && (
+                        <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded text-xs font-medium">
+                          Out of Stock
+                        </span>
+                      )}
+                      {lowStock && !outOfStock && (
+                        <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 rounded text-xs font-medium">
+                          Low Stock
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  {canRequest && (
+                    <td className="px-4 py-3">
+                      {balance > 0 ? (
+                        <button
+                          onClick={() => handleRequestStock(item)}
+                          className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition"
+                        >
+                          Request
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400">N/A</span>
+                      )}
+                    </td>
+                  )}
+                  {canEdit && (
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleEdit(item)}
+                        className="text-slate-600 hover:text-slate-900 mr-2"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(item.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        {filteredItems.length === 0 && items.length > 0 && (
+          <div className="px-4 py-8 text-center text-slate-500">
+            No items found matching "{searchQuery}"
+          </div>
+        )}
         {items.length === 0 && (
           <div className="px-4 py-8 text-center text-slate-500">No items yet.</div>
         )}

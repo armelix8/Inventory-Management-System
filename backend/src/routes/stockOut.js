@@ -1,18 +1,23 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma.js';
+import { authorize } from '../middleware/authorize.js';
 
 const router = Router();
 const MIN_QUANTITY = 1;
 
-// GET /api/stock-out - List stock out entries (optional ?itemId=xxx filter)
+// GET /api/stock-out - List stock out entries (optional ?itemId=xxx&status=PENDING filter)
 router.get('/', async (req, res) => {
   try {
-    const { itemId } = req.query;
-    const where = itemId ? { itemId } : {};
+    const { itemId, status } = req.query;
+    const where = {};
+    if (itemId) where.itemId = itemId;
+    if (status && ['PENDING', 'APPROVED', 'REJECTED'].includes(status)) {
+      where.status = status;
+    }
     const entries = await prisma.stockOut.findMany({
       where,
       include: { item: true },
-      orderBy: { requestedDate: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
     res.json(entries);
   } catch (error) {
@@ -35,7 +40,7 @@ router.post('/bulk', async (req, res) => {
       const itemName = r.itemName ?? r.item_name;
       const requestedDate = r.requestedDate ?? r.requested_date;
       const requestedQuarter = r.requestedQuarter ?? r.requested_quarter;
-      const requestingPerson = r.requestingPerson ?? r.requesting_person ?? '';
+      const requestingPerson = r.requestingPerson ?? r.requesting_person ?? req.user?.username ?? 'Unknown';
       const requestReason = r.requestReason ?? r.request_reason ?? '';
       const quantity = r.quantity;
       let resolvedItemId = itemId;
@@ -60,7 +65,7 @@ router.post('/bulk', async (req, res) => {
             _sum: { quantity: true },
           });
           const stockOutSum = await tx.stockOut.aggregate({
-            where: { itemId: resolvedItemId },
+            where: { itemId: resolvedItemId, status: 'APPROVED' },
             _sum: { quantity: true },
           });
           const balance = (stockInSum._sum.quantity ?? 0) - (stockOutSum._sum.quantity ?? 0);
@@ -75,6 +80,7 @@ router.post('/bulk', async (req, res) => {
               requestingPerson: String(requestingPerson).trim(),
               requestReason: String(requestReason).trim(),
               quantity: Number(quantity),
+              status: 'PENDING',
             },
             include: { item: true },
           });
@@ -101,9 +107,11 @@ router.post('/bulk', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { itemId, requestedDate, requestedQuarter, requestingPerson, requestReason, quantity } = req.body;
-    if (!itemId || !requestedDate || !requestedQuarter || !requestingPerson || !requestReason || quantity == null) {
+    // Use logged-in user's username if requestingPerson not provided
+    const finalRequestingPerson = requestingPerson || req.user?.username || 'Unknown';
+    if (!itemId || !requestedDate || !requestedQuarter || !requestReason || quantity == null) {
       return res.status(400).json({
-        error: 'Missing required fields: itemId, requestedDate, requestedQuarter, requestingPerson, requestReason, quantity',
+        error: 'Missing required fields: itemId, requestedDate, requestedQuarter, requestReason, quantity',
       });
     }
     if (quantity < MIN_QUANTITY) {
@@ -117,7 +125,7 @@ router.post('/', async (req, res) => {
         _sum: { quantity: true },
       });
       const stockOutSum = await tx.stockOut.aggregate({
-        where: { itemId },
+        where: { itemId, status: 'APPROVED' },
         _sum: { quantity: true },
       });
       const balance = (stockInSum._sum.quantity ?? 0) - (stockOutSum._sum.quantity ?? 0);
@@ -131,9 +139,10 @@ router.post('/', async (req, res) => {
           itemId,
           requestedDate: new Date(requestedDate),
           requestedQuarter,
-          requestingPerson,
+          requestingPerson: finalRequestingPerson,
           requestReason,
           quantity,
+          status: 'PENDING',
         },
         include: { item: true },
       });
@@ -145,6 +154,75 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Quantity exceeds available stock balance' });
     }
     if (error.code === 'P2003') return res.status(400).json({ error: 'Invalid itemId' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/stock-out/:id/approve - Approve stock out request (Admin/Manager only)
+router.post('/:id/approve', authorize(['ADMIN', 'MANAGER']), async (req, res) => {
+  try {
+    const entry = await prisma.stockOut.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!entry) return res.status(404).json({ error: 'Stock out request not found' });
+    if (entry.status !== 'PENDING') {
+      return res.status(400).json({ error: `Request is already ${entry.status.toLowerCase()}` });
+    }
+
+    // Check balance before approving
+    const stockInSum = await prisma.stockIn.aggregate({
+      where: { itemId: entry.itemId },
+      _sum: { quantity: true },
+    });
+    const approvedStockOutSum = await prisma.stockOut.aggregate({
+      where: { itemId: entry.itemId, status: 'APPROVED' },
+      _sum: { quantity: true },
+    });
+    const balance = (stockInSum._sum.quantity ?? 0) - (approvedStockOutSum._sum.quantity ?? 0);
+
+    if (entry.quantity > balance) {
+      return res.status(400).json({ error: 'Cannot approve: quantity exceeds available stock balance' });
+    }
+
+    const updated = await prisma.stockOut.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'APPROVED',
+        approvedBy: req.user.username,
+        approvedAt: new Date(),
+      },
+      include: { item: true },
+    });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/stock-out/:id/reject - Reject stock out request (Admin/Manager only)
+router.post('/:id/reject', authorize(['ADMIN', 'MANAGER']), async (req, res) => {
+  try {
+    const { rejectionReason } = req.body;
+    const entry = await prisma.stockOut.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!entry) return res.status(404).json({ error: 'Stock out request not found' });
+    if (entry.status !== 'PENDING') {
+      return res.status(400).json({ error: `Request is already ${entry.status.toLowerCase()}` });
+    }
+
+    const updated = await prisma.stockOut.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'REJECTED',
+        approvedBy: req.user.username,
+        approvedAt: new Date(),
+        rejectionReason: rejectionReason || null,
+      },
+      include: { item: true },
+    });
+    res.json(updated);
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });

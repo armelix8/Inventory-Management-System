@@ -18,7 +18,7 @@ router.get('/stats', async (req, res) => {
       itemIds.map(async (itemId) => {
         const [stockIn, stockOut] = await Promise.all([
           prisma.stockIn.aggregate({ where: { itemId }, _sum: { quantity: true } }),
-          prisma.stockOut.aggregate({ where: { itemId }, _sum: { quantity: true } }),
+          prisma.stockOut.aggregate({ where: { itemId, status: 'APPROVED' }, _sum: { quantity: true } }),
         ]);
         return (
           (stockIn._sum.quantity ?? 0) - (stockOut._sum.quantity ?? 0)
@@ -41,6 +41,20 @@ router.get('/stats', async (req, res) => {
       include: { item: { select: { itemName: true } } },
     });
 
+    // Approval statistics
+    const [pendingCount, approvedCount, rejectedCount] = await Promise.all([
+      prisma.stockOut.count({ where: { status: 'PENDING' } }),
+      prisma.stockOut.count({ where: { status: 'APPROVED' } }),
+      prisma.stockOut.count({ where: { status: 'REJECTED' } }),
+    ]);
+
+    const pendingApprovals = await prisma.stockOut.findMany({
+      where: { status: 'PENDING' },
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      include: { item: { select: { itemName: true } } },
+    });
+
     const stockInByQuarter = await prisma.stockIn.groupBy({
       by: ['receivedQuarter'],
       _sum: { quantity: true },
@@ -50,6 +64,7 @@ router.get('/stats', async (req, res) => {
 
     const stockOutByQuarter = await prisma.stockOut.groupBy({
       by: ['requestedQuarter'],
+      where: { status: 'APPROVED' },
       _sum: { quantity: true },
       orderBy: { requestedQuarter: 'desc' },
       take: 4,
@@ -76,6 +91,22 @@ router.get('/stats', async (req, res) => {
         quantity: e.quantity,
         date: e.requestedDate,
         person: e.requestingPerson,
+        status: e.status,
+        approvedBy: e.approvedBy,
+        approvedAt: e.approvedAt,
+      })),
+      approvals: {
+        pending: pendingCount,
+        approved: approvedCount,
+        rejected: rejectedCount,
+      },
+      pendingApprovals: pendingApprovals.map((e) => ({
+        id: e.id,
+        itemName: e.item.itemName,
+        quantity: e.quantity,
+        date: e.requestedDate,
+        person: e.requestingPerson,
+        reason: e.requestReason,
       })),
       stockInByQuarter: stockInByQuarter.map((q) => ({
         quarter: q.receivedQuarter,

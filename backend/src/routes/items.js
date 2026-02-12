@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma.js';
-import { classifyItem } from '../services/classifyItem.js';
 
 const router = Router();
 
@@ -8,6 +7,7 @@ const router = Router();
 router.get('/', async (req, res) => {
   try {
     const items = await prisma.stockItem.findMany({
+      include: { supplierRef: true },
       orderBy: { itemName: 'asc' },
     });
     res.json(items);
@@ -21,6 +21,7 @@ router.get('/:id', async (req, res) => {
   try {
     const item = await prisma.stockItem.findUnique({
       where: { id: req.params.id },
+      include: { supplierRef: true },
     });
     if (!item) return res.status(404).json({ error: 'Item not found' });
     res.json(item);
@@ -41,7 +42,8 @@ router.post('/bulk', async (req, res) => {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const itemName = r.itemName ?? r.item_name;
-      const supplier = r.supplier ?? '';
+      const supplierName = r.supplier ?? r.supplierName ?? '';
+      const supplierId = r.supplierId ?? r.supplier_id;
       const unit = r.unit ?? 'Piece';
       const unitPrice = r.unitPrice ?? r.unit_price;
       if (!itemName) {
@@ -49,14 +51,27 @@ router.post('/bulk', async (req, res) => {
         continue;
       }
       try {
-        const itemType = await classifyItem(String(itemName).trim());
+        const itemType = r.itemType ?? r.item_type ?? 'Other';
+        let resolvedSupplier = String(supplierName).trim();
+        let resolvedSupplierId = supplierId || null;
+        if (supplierId) {
+          const sup = await prisma.supplier.findUnique({ where: { id: supplierId } });
+          if (sup) {
+            resolvedSupplier = sup.name;
+            resolvedSupplierId = sup.id;
+          }
+        } else if (resolvedSupplier) {
+          const sup = await prisma.supplier.findFirst({ where: { name: { equals: resolvedSupplier, mode: 'insensitive' } } });
+          if (sup) resolvedSupplierId = sup.id;
+        }
         const item = await prisma.stockItem.create({
           data: {
             itemName: String(itemName).trim(),
-            supplier: String(supplier).trim(),
+            supplier: resolvedSupplier,
+            supplierId: resolvedSupplierId,
             unit: String(unit).trim(),
             unitPrice: Number(unitPrice) || 0,
-            itemType,
+            itemType: ['Asset', 'Consumable', 'Other'].includes(itemType) ? itemType : 'Other',
           },
         });
         created.push(item);
@@ -74,16 +89,24 @@ router.post('/bulk', async (req, res) => {
 // POST /api/items - Create item
 router.post('/', async (req, res) => {
   try {
-    const { itemName, supplier, unit, unitPrice, itemType } = req.body;
-    if (!itemName || !supplier || !unit || unitPrice == null) {
-      return res.status(400).json({ error: 'Missing required fields: itemName, supplier, unit, unitPrice' });
+    const { itemName, supplier, supplierId, unit, unitPrice, itemType } = req.body;
+    let supplierName = supplier;
+    let resolvedSupplierId = supplierId || null;
+    if (supplierId) {
+      const sup = await prisma.supplier.findUnique({ where: { id: supplierId } });
+      if (!sup) return res.status(400).json({ error: 'Invalid supplier' });
+      supplierName = sup.name;
+      resolvedSupplierId = sup.id;
     }
-    // Auto-classify if itemType not provided
-    const finalItemType = itemType || (await classifyItem(itemName));
+    if (!itemName || !supplierName || !unit || unitPrice == null) {
+      return res.status(400).json({ error: 'Missing required fields: itemName, supplier (or supplierId), unit, unitPrice' });
+    }
+    const finalItemType = ['Asset', 'Consumable', 'Other'].includes(itemType) ? itemType : 'Other';
     const item = await prisma.stockItem.create({
       data: {
         itemName,
-        supplier,
+        supplier: supplierName,
+        supplierId: resolvedSupplierId,
         unit,
         unitPrice: Number(unitPrice),
         itemType: finalItemType,
@@ -101,19 +124,27 @@ router.post('/', async (req, res) => {
 // PUT /api/items/:id - Update item
 router.put('/:id', async (req, res) => {
   try {
-    const { itemName, supplier, unit, unitPrice, itemType } = req.body;
+    const { itemName, supplier, supplierId, unit, unitPrice, itemType } = req.body;
     const data = {};
-    if (itemName != null) {
-      data.itemName = itemName;
-      // Re-classify if item name changed and itemType not explicitly provided
-      if (itemType == null) {
-        data.itemType = await classifyItem(itemName);
-      }
-    }
-    if (supplier != null) data.supplier = supplier;
+    if (itemName != null) data.itemName = itemName;
     if (unit != null) data.unit = unit;
     if (unitPrice != null) data.unitPrice = Number(unitPrice);
-    if (itemType != null) data.itemType = itemType;
+    if (itemType != null && ['Asset', 'Consumable', 'Other'].includes(itemType)) data.itemType = itemType;
+    if (supplierId !== undefined) {
+      if (supplierId) {
+        const sup = await prisma.supplier.findUnique({ where: { id: supplierId } });
+        if (!sup) return res.status(400).json({ error: 'Invalid supplier' });
+        data.supplier = sup.name;
+        data.supplierId = sup.id;
+      } else {
+        data.supplierId = null;
+        if (supplier != null) data.supplier = supplier;
+      }
+    } else if (supplier != null) {
+      data.supplier = supplier;
+      const sup = await prisma.supplier.findFirst({ where: { name: { equals: supplier, mode: 'insensitive' } } });
+      data.supplierId = sup ? sup.id : null;
+    }
 
     const item = await prisma.stockItem.update({
       where: { id: req.params.id },
@@ -123,50 +154,6 @@ router.put('/:id', async (req, res) => {
   } catch (error) {
     if (error.code === 'P2025') return res.status(404).json({ error: 'Item not found' });
     if (error.code === 'P2002') return res.status(409).json({ error: 'Item name already exists' });
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// POST /api/items/:id/reclassify - Re-classify an item using AI
-router.post('/:id/reclassify', async (req, res) => {
-  try {
-    const item = await prisma.stockItem.findUnique({
-      where: { id: req.params.id },
-    });
-    if (!item) return res.status(404).json({ error: 'Item not found' });
-
-    const newType = await classifyItem(item.itemName);
-    const updated = await prisma.stockItem.update({
-      where: { id: req.params.id },
-      data: { itemType: newType },
-    });
-    res.json(updated);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// POST /api/items/reclassify-all - Re-classify all items using AI
-router.post('/reclassify-all', async (req, res) => {
-  try {
-    const items = await prisma.stockItem.findMany();
-    const results = { updated: 0, errors: [] };
-
-    for (const item of items) {
-      try {
-        const newType = await classifyItem(item.itemName);
-        await prisma.stockItem.update({
-          where: { id: item.id },
-          data: { itemType: newType },
-        });
-        results.updated++;
-      } catch (error) {
-        results.errors.push({ itemId: item.id, itemName: item.itemName, error: error.message });
-      }
-    }
-
-    res.json(results);
-  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });

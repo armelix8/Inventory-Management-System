@@ -21,8 +21,8 @@ function parseJSON(text) {
 
 const FORMATS = {
   items: {
-    csv: 'itemName,supplier,unit,unitPrice\nLaptop,Dell Inc.,Piece,1299.99\nMouse,Logitech,Piece,29.99',
-    hint: 'CSV or JSON array. Columns: itemName, supplier, unit, unitPrice',
+    csv: 'itemName,supplier,unit,unitPrice,itemType\nLaptop,Dell Inc.,Piece,1299.99,Asset\nMouse,Logitech,Piece,29.99,Consumable',
+    hint: 'CSV or JSON array. Columns: itemName, supplier, unit, unitPrice, itemType (optional: Asset, Consumable, Other)',
   },
   stockIn: {
     csv: 'itemName,receivedDate,receivedQuarter,quantity,specification\nLaptop,2025-02-09,Q1 2025,10,New batch',

@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
           _sum: { quantity: true },
         }),
         prisma.stockOut.aggregate({
-          where: { itemId },
+          where: { itemId, status: 'APPROVED' },
           _sum: { quantity: true },
         }),
       ]);
@@ -35,7 +35,7 @@ router.get('/', async (req, res) => {
       items.map(async (item) => {
         const [stockIn, stockOut] = await Promise.all([
           prisma.stockIn.aggregate({ where: { itemId: item.id }, _sum: { quantity: true } }),
-          prisma.stockOut.aggregate({ where: { itemId: item.id }, _sum: { quantity: true } }),
+          prisma.stockOut.aggregate({ where: { itemId: item.id, status: 'APPROVED' }, _sum: { quantity: true } }),
         ]);
         const balance = (stockIn._sum.quantity ?? 0) - (stockOut._sum.quantity ?? 0);
         return { itemId: item.id, itemName: item.itemName, balance };
