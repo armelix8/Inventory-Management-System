@@ -1,0 +1,76 @@
+// Inventory Stock Management - Prisma Schema
+// PostgreSQL database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model for authentication
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// 5.1 Stock List (Items Master) - Static item registry
+// NO quantity stored here
+model StockItem {
+  id         String   @id @default(uuid())
+  itemName   String   @unique(map: "StockItem_itemName_key")
+  supplier   String
+  unit       String
+  unitPrice  Decimal  @map("unit_price")
+  itemType   String?  @default("Other") @map("item_type") // Asset, Consumable, Other
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  stockIns   StockIn[]
+  stockOuts  StockOut[]
+
+  @@map("stock_items")
+}
+
+// 5.2 Stock In - Incoming stock
+model StockIn {
+  id              String   @id @default(uuid())
+  itemId          String   @map("item_id")
+  receivedDate    DateTime @map("received_date")
+  receivedQuarter String   @map("received_quarter")
+  quantity        Int      // Must be > 0 (validated in API)
+  specification   String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  item StockItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([itemId])
+  @@index([receivedDate])
+  @@map("stock_ins")
+}
+
+// 5.3 Stock Out - Stock requests
+model StockOut {
+  id               String   @id @default(uuid())
+  itemId           String   @map("item_id")
+  requestedDate    DateTime @map("requested_date")
+  requestedQuarter String   @map("requested_quarter")
+  requestingPerson String   @map("requesting_person")
+  requestReason    String   @map("request_reason") @db.Text
+  quantity         Int      // Must be > 0 (validated in API)
+  createdAt        DateTime @default(now())
+
+  item StockItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([itemId])
+  @@index([requestedDate])
+  @@map("stock_outs")
+}
