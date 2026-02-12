@@ -3,12 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import BulkImportModal from '../components/BulkImportModal';
-
-const getQuarter = (d) => {
-  const date = d ? new Date(d) : new Date();
-  const q = Math.floor(date.getMonth() / 3) + 1;
-  return `Q${q} ${date.getFullYear()}`;
-};
+import { getQuarterFromDate } from '../utils/quarters';
 
 export default function StockOutPage() {
   const { user } = useAuth();
@@ -31,8 +26,6 @@ export default function StockOutPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [form, setForm] = useState({
     itemId: preSelectedItemId || '',
-    requestedDate: new Date().toISOString().slice(0, 10),
-    requestedQuarter: getQuarter(),
     requestingPerson: user?.username || '',
     requestReason: '',
     quantity: '',
@@ -82,10 +75,8 @@ export default function StockOutPage() {
 
   const getBalance = (itemId) => balances.find((b) => b.itemId === itemId)?.balance ?? 0;
 
-  const handleDateChange = (dateStr) => {
-    const quarter = getQuarter(dateStr);
-    setForm({ ...form, requestedDate: dateStr, requestedQuarter: quarter });
-  };
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayQuarter = getQuarterFromDate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -93,16 +84,14 @@ export default function StockOutPage() {
     try {
       await api.stockOut.create({
         itemId: form.itemId,
-        requestedDate: form.requestedDate,
-        requestedQuarter: form.requestedQuarter,
+        requestedDate: todayStr,
+        requestedQuarter: todayQuarter,
         requestingPerson: user?.username || form.requestingPerson,
         requestReason: form.requestReason,
         quantity: Number(form.quantity),
       });
       setForm({
         itemId: '',
-        requestedDate: new Date().toISOString().slice(0, 10),
-        requestedQuarter: getQuarter(),
         requestingPerson: user?.username || '',
         requestReason: '',
         quantity: '',
@@ -218,23 +207,22 @@ export default function StockOutPage() {
           <label>
             <span className="block text-sm text-slate-600 mb-1">Requested Date</span>
             <input
-              type="date"
-              required
-              value={form.requestedDate}
-              onChange={(e) => handleDateChange(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md"
+              type="text"
+              value={todayStr}
+              readOnly
+              className="w-full px-3 py-2 border border-slate-300 rounded-md bg-slate-50 text-slate-600"
             />
+            <span className="text-xs text-slate-500 mt-1 block">Fixed to today&apos;s date</span>
           </label>
           <label>
             <span className="block text-sm text-slate-600 mb-1">Quarter</span>
             <input
               type="text"
-              required
-              value={form.requestedQuarter}
-              onChange={(e) => setForm({ ...form, requestedQuarter: e.target.value })}
-              placeholder="Q1 2025"
-              className="w-full px-3 py-2 border border-slate-300 rounded-md"
+              value={todayQuarter}
+              readOnly
+              className="w-full px-3 py-2 border border-slate-300 rounded-md bg-slate-50 text-slate-600"
             />
+            <span className="text-xs text-slate-500 mt-1 block">Auto from today (Q1: Jul–Sep, Q2: Oct–Dec, Q3: Jan–Mar, Q4: Apr–Jun)</span>
           </label>
           <label>
             <span className="block text-sm text-slate-600 mb-1">Requesting Person</span>

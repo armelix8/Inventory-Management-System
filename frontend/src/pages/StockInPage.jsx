@@ -2,12 +2,7 @@ import { useState, useEffect } from 'react';
 import { api, openProofOfDelivery } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import BulkImportModal from '../components/BulkImportModal';
-
-const getQuarter = (d) => {
-  const date = d ? new Date(d) : new Date();
-  const q = Math.floor(date.getMonth() / 3) + 1;
-  return `Q${q} ${date.getFullYear()}`;
-};
+import { getQuarterFromDate } from '../utils/quarters';
 
 export default function StockInPage() {
   const { user } = useAuth();
@@ -22,7 +17,6 @@ export default function StockInPage() {
   const [form, setForm] = useState({
     itemId: '',
     receivedDate: new Date().toISOString().slice(0, 10),
-    receivedQuarter: getQuarter(),
     quantity: '',
     specification: '',
   });
@@ -49,9 +43,10 @@ export default function StockInPage() {
   }, []);
 
   const handleDateChange = (dateStr) => {
-    const quarter = getQuarter(dateStr);
-    setForm({ ...form, receivedDate: dateStr, receivedQuarter: quarter });
+    setForm({ ...form, receivedDate: dateStr });
   };
+
+  const receivedQuarter = getQuarterFromDate(form.receivedDate);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -60,7 +55,7 @@ export default function StockInPage() {
         const formData = new FormData();
         formData.append('itemId', form.itemId);
         formData.append('receivedDate', form.receivedDate);
-        formData.append('receivedQuarter', form.receivedQuarter);
+        formData.append('receivedQuarter', receivedQuarter);
         formData.append('quantity', form.quantity);
         formData.append('specification', form.specification || '');
         formData.append('proofOfDelivery', proofFile);
@@ -69,7 +64,7 @@ export default function StockInPage() {
         await api.stockIn.create({
           itemId: form.itemId,
           receivedDate: form.receivedDate,
-          receivedQuarter: form.receivedQuarter,
+          receivedQuarter: receivedQuarter,
           quantity: Number(form.quantity),
           specification: form.specification || null,
         });
@@ -77,7 +72,6 @@ export default function StockInPage() {
       setForm({
         itemId: '',
         receivedDate: new Date().toISOString().slice(0, 10),
-        receivedQuarter: getQuarter(),
         quantity: '',
         specification: '',
       });
@@ -157,12 +151,11 @@ export default function StockInPage() {
             <span className="block text-sm text-slate-600 mb-1">Quarter</span>
             <input
               type="text"
-              required
-              value={form.receivedQuarter}
-              onChange={(e) => setForm({ ...form, receivedQuarter: e.target.value })}
-              placeholder="Q1 2025"
-              className="w-full px-3 py-2 border border-slate-300 rounded-md"
+              value={receivedQuarter}
+              readOnly
+              className="w-full px-3 py-2 border border-slate-300 rounded-md bg-slate-50 text-slate-600"
             />
+            <span className="text-xs text-slate-500 mt-1 block">Auto from date (Q1: Jul–Sep, Q2: Oct–Dec, Q3: Jan–Mar, Q4: Apr–Jun)</span>
           </label>
           <label>
             <span className="block text-sm text-slate-600 mb-1">Quantity</span>

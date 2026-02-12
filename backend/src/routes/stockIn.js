@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import path from 'path';
+import { getQuarterFromDate } from '../utils/quarters.js';
 import { fileURLToPath } from 'url';
 import prisma from '../lib/prisma.js';
 import { uploadProofOfDelivery } from '../middleware/upload.js';
@@ -51,7 +52,6 @@ router.post('/bulk', async (req, res) => {
       const itemId = r.itemId ?? r.item_id;
       let itemName = r.itemName ?? r.item_name;
       const receivedDate = r.receivedDate ?? r.received_date;
-      const receivedQuarter = r.receivedQuarter ?? r.received_quarter;
       const quantity = r.quantity;
       const specification = r.specification ?? null;
       let resolvedItemId = itemId;
@@ -61,8 +61,8 @@ router.post('/bulk', async (req, res) => {
         });
         resolvedItemId = item?.id;
       }
-      if (!resolvedItemId || !receivedDate || !receivedQuarter || quantity == null) {
-        errors.push({ row: i + 1, error: 'Missing itemId/itemName, receivedDate, receivedQuarter, or quantity' });
+      if (!resolvedItemId || !receivedDate || quantity == null) {
+        errors.push({ row: i + 1, error: 'Missing itemId/itemName, receivedDate, or quantity' });
         continue;
       }
       if (Number(quantity) < MIN_QUANTITY) {
@@ -74,7 +74,7 @@ router.post('/bulk', async (req, res) => {
           data: {
             itemId: resolvedItemId,
             receivedDate: new Date(receivedDate),
-            receivedQuarter: String(receivedQuarter).trim(),
+            receivedQuarter: getQuarterFromDate(receivedDate),
             quantity: Number(quantity),
             specification: specification ? String(specification).trim() : null,
           },
@@ -95,9 +95,9 @@ router.post('/bulk', async (req, res) => {
 // POST /api/stock-in - Create stock in entry (supports multipart/form-data with PDF proof of delivery)
 router.post('/', uploadProofOfDelivery, async (req, res) => {
   try {
-    const { itemId, receivedDate, receivedQuarter, quantity, specification } = req.body;
-    if (!itemId || !receivedDate || !receivedQuarter || quantity == null) {
-      return res.status(400).json({ error: 'Missing required fields: itemId, receivedDate, receivedQuarter, quantity' });
+    const { itemId, receivedDate, quantity, specification } = req.body;
+    if (!itemId || !receivedDate || quantity == null) {
+      return res.status(400).json({ error: 'Missing required fields: itemId, receivedDate, quantity' });
     }
     if (Number(quantity) < MIN_QUANTITY) {
       return res.status(400).json({ error: 'Quantity must be greater than 0' });
@@ -110,7 +110,7 @@ router.post('/', uploadProofOfDelivery, async (req, res) => {
       data: {
         itemId,
         receivedDate: new Date(receivedDate),
-        receivedQuarter: String(receivedQuarter).trim(),
+        receivedQuarter: getQuarterFromDate(receivedDate),
         quantity: Number(quantity),
         specification: specification ? String(specification).trim() : null,
         proofOfDelivery: proofOfDeliveryPath,

@@ -6,11 +6,12 @@ const router = Router();
 // GET /api/dashboard/stats - Get dashboard statistics
 router.get('/stats', async (req, res) => {
   try {
-    const [itemsCount, stockInsCount, stockOutsCount, items] = await Promise.all([
+    const [itemsCount, stockInsCount, stockOutsCount, suppliersCount, items] = await Promise.all([
       prisma.stockItem.count(),
       prisma.stockIn.count(),
       prisma.stockOut.count(),
-      prisma.stockItem.findMany({ select: { id: true } }),
+      prisma.supplier.count(),
+      prisma.stockItem.findMany({ select: { id: true, itemName: true, unitPrice: true } }),
     ]);
 
     const itemIds = items.map((i) => i.id);
@@ -20,13 +21,15 @@ router.get('/stats', async (req, res) => {
           prisma.stockIn.aggregate({ where: { itemId }, _sum: { quantity: true } }),
           prisma.stockOut.aggregate({ where: { itemId, status: 'APPROVED' }, _sum: { quantity: true } }),
         ]);
-        return (
-          (stockIn._sum.quantity ?? 0) - (stockOut._sum.quantity ?? 0)
-        );
+        return (stockIn._sum.quantity ?? 0) - (stockOut._sum.quantity ?? 0);
       })
     );
 
     const totalBalance = balances.reduce((sum, b) => sum + b, 0);
+    const totalStockValue = items.reduce(
+      (sum, item, idx) => sum + Number(item.unitPrice) * (balances[idx] ?? 0),
+      0
+    );
     const lowStockItems = balances.filter((b) => b < 10).length;
 
     const recentStockIns = await prisma.stockIn.findMany({
@@ -58,17 +61,31 @@ router.get('/stats', async (req, res) => {
     const stockInByQuarter = await prisma.stockIn.groupBy({
       by: ['receivedQuarter'],
       _sum: { quantity: true },
-      orderBy: { receivedQuarter: 'desc' },
-      take: 4,
+      orderBy: { receivedQuarter: 'asc' },
     });
 
     const stockOutByQuarter = await prisma.stockOut.groupBy({
       by: ['requestedQuarter'],
       where: { status: 'APPROVED' },
       _sum: { quantity: true },
-      orderBy: { requestedQuarter: 'desc' },
-      take: 4,
+      orderBy: { requestedQuarter: 'asc' },
     });
+
+    const recentlyAddedItems = await prisma.stockItem.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, itemName: true, unitPrice: true },
+    });
+
+    const lowStockOrOutOfStock = items
+      .map((item, idx) => ({
+        id: item.id,
+        itemName: item.itemName,
+        balance: balances[idx] ?? 0,
+        unitPrice: item.unitPrice,
+      }))
+      .filter((x) => x.balance < 10)
+      .slice(0, 10);
 
     res.json({
       summary: {
@@ -76,8 +93,21 @@ router.get('/stats', async (req, res) => {
         totalStockIns: stockInsCount,
         totalStockOuts: stockOutsCount,
         totalBalance,
+        totalStockValue,
         lowStockItems,
+        suppliersCount,
       },
+      recentlyAddedItems: recentlyAddedItems.map((i) => ({
+        id: i.id,
+        itemName: i.itemName,
+        price: Number(i.unitPrice),
+      })),
+      lowStockOrOutOfStock: lowStockOrOutOfStock.map((i) => ({
+        id: i.id,
+        itemName: i.itemName,
+        balance: i.balance,
+        unitPrice: Number(i.unitPrice),
+      })),
       recentStockIns: recentStockIns.map((e) => ({
         id: e.id,
         itemName: e.item.itemName,

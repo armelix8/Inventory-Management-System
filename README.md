@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Inventory Stock Management
 
 A production-ready inventory management system that digitizes an Excel-based stock workflow.
@@ -107,6 +106,3 @@ frontend/
 ## Database Access
 
 You do **not** have direct database access from this application. All database operations are performed locally via Prisma. Configure `.env` with your PostgreSQL credentials and run migrations/seeds yourself. See `backend/DATABASE_SETUP.md` for details.
-=======
-# Inventory-Management-System
->>>>>>> dd34bdba10f423882c152e531990c6bb480705c8

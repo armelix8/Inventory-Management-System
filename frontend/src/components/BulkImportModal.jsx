@@ -25,12 +25,12 @@ const FORMATS = {
     hint: 'CSV or JSON array. Columns: itemName, supplier, unit, unitPrice, itemType (optional: Asset, Consumable, Other)',
   },
   stockIn: {
-    csv: 'itemName,receivedDate,receivedQuarter,quantity,specification\nLaptop,2025-02-09,Q1 2025,10,New batch',
-    hint: 'CSV or JSON. Columns: itemName (or itemId), receivedDate, receivedQuarter, quantity, specification',
+    csv: 'itemName,receivedDate,quantity,specification\nLaptop,2025-02-09,10,New batch',
+    hint: 'CSV or JSON. Columns: itemName (or itemId), receivedDate, quantity. Quarter is auto from date.',
   },
   stockOut: {
-    csv: 'itemName,requestedDate,requestedQuarter,requestingPerson,requestReason,quantity\nLaptop,2025-02-09,Q1 2025,John Doe,Equipment request,2',
-    hint: 'CSV or JSON. Columns: itemName (or itemId), requestedDate, requestedQuarter, requestingPerson, requestReason, quantity',
+    csv: 'itemName,requestedDate,requestingPerson,requestReason,quantity\nLaptop,2025-02-09,John Doe,Equipment request,2',
+    hint: 'CSV or JSON. Columns: itemName (or itemId), requestedDate, requestingPerson, requestReason, quantity. Quarter is auto from date.',
   },
 };
 

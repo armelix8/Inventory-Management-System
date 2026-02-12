@@ -54,6 +54,8 @@ npx prisma migrate dev --name init
 
 This creates the `stock_items`, `stock_ins`, and `stock_outs` tables.
 
+For notifications: `npx prisma migrate dev --name add_notifications`
+
 ---
 
 ## Generate Prisma Client
@@ -74,10 +76,11 @@ node prisma/seed.js
 
 ## Data Model Summary
 
-| Table       | Purpose                          |
-|------------|-----------------------------------|
-| stock_items | Item master (no quantity stored) |
-| stock_ins   | Incoming stock entries           |
-| stock_outs  | Stock-out requests               |
+| Table         | Purpose                          |
+|---------------|-----------------------------------|
+| stock_items   | Item master (no quantity stored) |
+| stock_ins     | Incoming stock entries           |
+| stock_outs    | Stock-out requests               |
+| notifications | In-app user notifications       |
 
 **Stock balance** = `SUM(stock_in.quantity) - SUM(stock_out.quantity)` — computed at runtime, not stored.

@@ -19,7 +19,13 @@ async function request(path, options = {}) {
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
+    // Don't redirect for: auth attempts (show error), /auth/me (AuthContext handles it), or notifications (optional)
+    const noRedirect =
+      path.includes('/auth/login') ||
+      path.includes('/auth/register') ||
+      path.includes('/auth/me') ||
+      path.includes('/notifications');
+    if ((res.status === 401 || res.status === 403) && !noRedirect) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
@@ -121,6 +127,12 @@ export const api = {
   },
   dashboard: {
     stats: () => request('/dashboard/stats'),
+  },
+  notifications: {
+    list: (limit) => request(`/notifications${limit ? `?limit=${limit}` : ''}`),
+    markRead: (id) => request(`/notifications/${id}/read`, { method: 'PATCH' }),
+    markAllRead: () => request('/notifications/read-all', { method: 'POST' }),
+    unreadCount: () => request('/notifications/unread-count'),
   },
   users: {
     list: () => request('/users'),

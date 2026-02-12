@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import BulkImportModal from '../components/BulkImportModal';
@@ -7,6 +7,7 @@ import BulkImportModal from '../components/BulkImportModal';
 export default function ItemsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const isViewer = user?.role === 'VIEWER';
   const isUser = user?.role === 'USER';
   const canEdit = !isViewer && !isUser; // Only ADMIN and MANAGER can edit
@@ -16,7 +17,7 @@ export default function ItemsPage() {
   const [balances, setBalances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [formOpen, setFormOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -50,6 +51,11 @@ export default function ItemsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (q) setSearchQuery(q);
+  }, [searchParams]);
 
   const getBalance = (itemId) => balances.find((b) => b.itemId === itemId)?.balance ?? 0;
   

@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import { getQuarterFromDate } from '../utils/quarters.js';
 import prisma from '../lib/prisma.js';
 import { authorize } from '../middleware/authorize.js';
+import { notifyAdminsOfPendingRequest, notifyRequesterOfDecision } from '../services/notifications.js';
 
 const router = Router();
 const MIN_QUANTITY = 1;
@@ -39,7 +41,6 @@ router.post('/bulk', async (req, res) => {
       const itemId = r.itemId ?? r.item_id;
       const itemName = r.itemName ?? r.item_name;
       const requestedDate = r.requestedDate ?? r.requested_date;
-      const requestedQuarter = r.requestedQuarter ?? r.requested_quarter;
       const requestingPerson = r.requestingPerson ?? r.requesting_person ?? req.user?.username ?? 'Unknown';
       const requestReason = r.requestReason ?? r.request_reason ?? '';
       const quantity = r.quantity;
@@ -50,8 +51,8 @@ router.post('/bulk', async (req, res) => {
         });
         resolvedItemId = item?.id;
       }
-      if (!resolvedItemId || !requestedDate || !requestedQuarter || quantity == null) {
-        errors.push({ row: i + 1, error: 'Missing itemId/itemName, requestedDate, requestedQuarter, or quantity' });
+      if (!resolvedItemId || !requestedDate || quantity == null) {
+        errors.push({ row: i + 1, error: 'Missing itemId/itemName, requestedDate, or quantity' });
         continue;
       }
       if (Number(quantity) < MIN_QUANTITY) {
@@ -76,7 +77,7 @@ router.post('/bulk', async (req, res) => {
             data: {
               itemId: resolvedItemId,
               requestedDate: new Date(requestedDate),
-              requestedQuarter: String(requestedQuarter).trim(),
+              requestedQuarter: getQuarterFromDate(requestedDate),
               requestingPerson: String(requestingPerson).trim(),
               requestReason: String(requestReason).trim(),
               quantity: Number(quantity),
@@ -106,16 +107,21 @@ router.post('/bulk', async (req, res) => {
 // 6.2 Prevent stock-out if quantity exceeds balance
 router.post('/', async (req, res) => {
   try {
-    const { itemId, requestedDate, requestedQuarter, requestingPerson, requestReason, quantity } = req.body;
+    const { itemId, requestedDate, requestingPerson, requestReason, quantity } = req.body;
     // Use logged-in user's username if requestingPerson not provided
     const finalRequestingPerson = requestingPerson || req.user?.username || 'Unknown';
-    if (!itemId || !requestedDate || !requestedQuarter || !requestReason || quantity == null) {
+    if (!itemId || !requestedDate || !requestReason || quantity == null) {
       return res.status(400).json({
-        error: 'Missing required fields: itemId, requestedDate, requestedQuarter, requestReason, quantity',
+        error: 'Missing required fields: itemId, requestedDate, requestReason, quantity',
       });
     }
     if (quantity < MIN_QUANTITY) {
       return res.status(400).json({ error: 'Quantity must be greater than 0' });
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const reqDateStr = new Date(requestedDate).toISOString().slice(0, 10);
+    if (reqDateStr !== today) {
+      return res.status(400).json({ error: 'Request date must be today' });
     }
 
     const entry = await prisma.$transaction(async (tx) => {
@@ -138,7 +144,7 @@ router.post('/', async (req, res) => {
         data: {
           itemId,
           requestedDate: new Date(requestedDate),
-          requestedQuarter,
+          requestedQuarter: getQuarterFromDate(requestedDate),
           requestingPerson: finalRequestingPerson,
           requestReason,
           quantity,
@@ -148,6 +154,7 @@ router.post('/', async (req, res) => {
       });
     });
 
+    notifyAdminsOfPendingRequest(entry.item.itemName, entry.quantity).catch(() => {});
     res.status(201).json(entry);
   } catch (error) {
     if (error.message === 'INSUFFICIENT_STOCK') {
@@ -193,6 +200,7 @@ router.post('/:id/approve', authorize(['ADMIN', 'MANAGER']), async (req, res) =>
       },
       include: { item: true },
     });
+    notifyRequesterOfDecision(updated.requestingPerson, 'APPROVED', updated.item.itemName, updated.quantity).catch(() => {});
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -221,6 +229,7 @@ router.post('/:id/reject', authorize(['ADMIN', 'MANAGER']), async (req, res) => 
       },
       include: { item: true },
     });
+    notifyRequesterOfDecision(updated.requestingPerson, 'REJECTED', updated.item.itemName, updated.quantity).catch(() => {});
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: error.message });

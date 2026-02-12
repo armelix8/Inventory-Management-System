@@ -13,6 +13,7 @@ import stockInRouter from './routes/stockIn.js';
 import stockOutRouter from './routes/stockOut.js';
 import balanceRouter from './routes/balance.js';
 import dashboardRouter from './routes/dashboard.js';
+import notificationsRouter from './routes/notifications.js';
 import { authenticateToken } from './middleware/auth.js';
 
 const app = express();
@@ -35,6 +36,7 @@ app.use('/api/stock-in', authenticateToken, stockInRouter);
 app.use('/api/stock-out', authenticateToken, stockOutRouter);
 app.use('/api/balance', authenticateToken, balanceRouter);
 app.use('/api/dashboard', authenticateToken, dashboardRouter);
+app.use('/api/notifications', authenticateToken, notificationsRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });

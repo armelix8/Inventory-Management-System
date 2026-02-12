@@ -36,7 +36,27 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  notifications Notification[]
+
   @@map("users")
+}
+
+// In-app notifications
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String   // PENDING_APPROVAL, APPROVED, REJECTED, LOW_STOCK
+  title     String
+  message   String   @db.Text
+  link      String?  // e.g. /stock-out?status=PENDING
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@map("notifications")
 }
 
 // Supplier master
