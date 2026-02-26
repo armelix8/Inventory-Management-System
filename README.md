@@ -4,11 +4,11 @@ A production-ready inventory management system that digitizes an Excel-based sto
 
 ## Tech Stack
 
-- **Frontend:** React (Vite), Tailwind CSS
-- **Backend:** Node.js, Express
+- **Frontend:** Next.js 15 (App Router), React 19, Tailwind CSS
+- **Backend:** Next.js API routes (same app)
+- **Auth:** NextAuth.js (JWT, Credentials provider)
 - **Database:** PostgreSQL
 - **ORM:** Prisma
-- **API:** REST
 
 ## Quick Start
 
@@ -28,81 +28,91 @@ GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO inventory_user;
 
 Replace `strongpassword` with a secure password.
 
-### 2. Backend Setup
+### 2. App Setup
+
+From the project root:
 
 ```bash
-cd backend
 cp .env.example .env
-# Edit .env and set DATABASE_URL="postgresql://inventory_user:strongpassword@localhost:5432/inventory_db"
+# Edit .env:
+#   DATABASE_URL="postgresql://inventory_user:strongpassword@localhost:5432/inventory_db"
+#   NEXTAUTH_SECRET="your-secret-key-change-in-production"
+#   NEXTAUTH_URL="http://localhost:5173"
 
 npm install
-npx prisma generate
-npx prisma migrate dev --name init
-node prisma/seed.js
+npm run db:generate
+npm run db:migrate -- --name init
+npm run db:seed
 npm run dev
 ```
 
-The backend runs on `http://localhost:3001`.
+The app runs on **http://localhost:5173**. No separate backend server is needed; API routes are served by the same Next.js app.
 
-### 3. Frontend Setup
+**Default login:** username `admin`, password `admin123`
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+### 3. Scripts
 
-The frontend runs on `http://localhost:5173` and proxies `/api` to the backend.
-
-### 4. Run Both
-
-From project root:
-
-```bash
-cd backend && npm run dev
-# In another terminal:
-cd frontend && npm run dev
-```
+| Script        | Description              |
+|---------------|--------------------------|
+| `npm run dev` | Start dev server (port 5173) |
+| `npm run build` | Production build       |
+| `npm run start` | Start production server |
+| `npm run db:generate` | Generate Prisma client |
+| `npm run db:migrate` | Run migrations       |
+| `npm run db:seed` | Seed database        |
+| `npm run db:studio` | Open Prisma Studio  |
 
 ## Project Structure
 
 ```
-backend/
-  prisma/
-    schema.prisma
-    seed.js
-  src/
-    routes/
-    lib/
-    server.js
-frontend/
-  src/
-    pages/
-    App.jsx
+app/
+  api/              # API route handlers (items, stock-in, stock-out, auth, etc.)
+  login/            # login page
+  register/         # register page
+  dashboard/        # dashboard, items, stock-in, stock-out, suppliers, users
+prisma/
+  schema.prisma
+  seed.js
+src/
+  lib/              # prisma, auth, quarters, notifications
+  contexts/         # useAuth (NextAuth wrapper)
+  components/
+  pages/            # page components
 ```
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| POST | /api/auth/register | Register new user |
+| GET/POST | /api/auth/[...nextauth] | NextAuth (login, session) |
 | GET | /api/items | List items |
 | POST | /api/items | Create item |
 | GET | /api/items/:id | Get item |
 | PUT | /api/items/:id | Update item |
 | DELETE | /api/items/:id | Delete item |
+| POST | /api/items/bulk | Bulk import items |
 | GET | /api/stock-in | List stock in entries |
-| POST | /api/stock-in | Record stock in |
+| POST | /api/stock-in | Record stock in (JSON or multipart with PDF) |
+| POST | /api/stock-in/bulk | Bulk stock in |
 | GET | /api/stock-out | List stock out entries |
 | POST | /api/stock-out | Request stock out (balance check) |
-| GET | /api/balance | Get balances for all items |
-| GET | /api/balance?itemId=xxx | Get balance for item |
+| POST | /api/stock-out/:id/approve | Approve (Admin/Manager) |
+| POST | /api/stock-out/:id/reject | Reject (Admin/Manager) |
+| GET | /api/balance | Get balances |
+| GET | /api/dashboard/stats | Dashboard stats |
+| GET | /api/notifications | List notifications |
+| GET | /api/users | List users (Admin/Manager) |
+| ... | ... | (see app/api/) |
 
 ## Business Rules
 
-- **Stock balance** = `SUM(stock_in.quantity) - SUM(stock_out.quantity)` — computed at runtime
+- **Stock balance** = `SUM(stock_in.quantity) - SUM(approved stock_out.quantity)` — computed at runtime
 - Stock out requests are rejected if quantity exceeds available balance
-- Stock out inserts use database transactions for consistency
+- Stock out approval/rejection is restricted to Admin and Manager roles
 
-## Database Access
+## Environment
 
-You do **not** have direct database access from this application. All database operations are performed locally via Prisma. Configure `.env` with your PostgreSQL credentials and run migrations/seeds yourself. See `backend/DATABASE_SETUP.md` for details.
+- `DATABASE_URL` – PostgreSQL connection string
+- `NEXTAUTH_SECRET` – Secret for JWT signing (use a long random string in production)
+- `NEXTAUTH_URL` – Full URL of the app (e.g. `http://localhost:5173`)
